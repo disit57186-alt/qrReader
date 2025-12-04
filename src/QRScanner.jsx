@@ -10,7 +10,6 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
   const [scanning, setScanning] = useState(false);
   const scannerRef = useRef(null);
   const dbRef = useRef(null);
-  const scannedSet = useRef(new Set());
 
   // Initialize IndexedDB
   useEffect(() => {
@@ -26,12 +25,11 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
 
       const allScans = await db.getAll("scans");
       setHistory(allScans);
-      scannedSet.current = new Set(allScans.map((x) => x.value));
     };
     initDB();
   }, []);
 
-  // Start scanning manually
+  // Start scanning
   const startScanning = async () => {
     if (!dbRef.current) return;
     if (scannerRef.current) return; // already scanning
@@ -43,18 +41,16 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
         { facingMode: "environment" },
         { fps, qrbox: qrBoxSize },
         async (decodedText) => {
-          if (!scannedSet.current.has(decodedText)) {
-            scannedSet.current.add(decodedText);
+          const cleanedText = decodedText.trim(); // remove whitespace
 
-            const entry = {
-              value: decodedText,
-              time: new Date().toLocaleString(),
-            };
+          const entry = {
+            value: cleanedText,
+            time: new Date().toLocaleString(),
+          };
 
-            await dbRef.current.add("scans", entry);
-            setHistory((prev) => [entry, ...prev]);
-            setLastScan(decodedText);
-          }
+          await dbRef.current.add("scans", entry);
+          setHistory((prev) => [entry, ...prev]);
+          setLastScan(cleanedText);
         },
         (_error) => {}
       );
@@ -82,17 +78,17 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
     }
   };
 
-  // Export to Excel and reset for fresh scans
+  // Export Excel and reset for fresh scans
   const exportToExcel = async () => {
-    if (history.length === 0) {
+    if (!history || history.length === 0) {
       alert("No data to export!");
       return;
     }
 
-    // Prepare data with headers
+    // Prepare data for Excel
     const worksheetData = history.map((item) => ({
-      "Scanned Value": item.value,
-      "Date & Time": item.time,
+      "Scanned Value": item.value || "",
+      "Date & Time": item.time || "",
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(worksheetData);
@@ -105,17 +101,17 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
     });
 
     const file = new Blob([excelBuffer], {
-      type:
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
 
-    // Save with current date in filename
-    const dateStr = new Date().toISOString().split("T")[0];
-    saveAs(file, `QRCode_Scans_${dateStr}.xlsx`);
+    // Include date and time in filename
+    const now = new Date();
+    const dateStr = now.toISOString().split("T")[0]; // YYYY-MM-DD
+    const timeStr = now.toTimeString().split(" ")[0].replace(/:/g, "-"); // HH-MM-SS
+    saveAs(file, `QRCode_Scans_${dateStr}_${timeStr}.xlsx`);
 
-    // Reset app state for fresh scans
+    // Reset state for fresh session
     setHistory([]);
-    scannedSet.current.clear();
     setLastScan("");
     if (dbRef.current) {
       await dbRef.current.clear("scans").catch((err) => console.error(err));
