@@ -4,7 +4,7 @@ import { openDB } from "idb";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 
-export default function QRScanner({ qrBoxSize = 300, fps = 25 }) {
+export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
   const [history, setHistory] = useState([]);
   const [lastScan, setLastScan] = useState("");
   const [scanning, setScanning] = useState(false);
@@ -31,69 +31,54 @@ export default function QRScanner({ qrBoxSize = 300, fps = 25 }) {
     initDB();
   }, []);
 
-  // Start scanning
+  // Start scanning manually
   const startScanning = async () => {
     if (!dbRef.current) return;
-    if (scannerRef.current) return;
+    if (scannerRef.current) return; // already scanning
+
+    const scanner = new Html5Qrcode("qr-reader");
 
     try {
-      const cameras = await Html5Qrcode.getCameras();
-      if (!cameras || cameras.length === 0) {
-        alert("No camera found on device");
-        return;
-      }
-
-      // Prefer back camera
-      const backCamera = cameras.find((cam) =>
-        cam.label.toLowerCase().includes("back")
-      ) || cameras[0];
-
-      const scanner = new Html5Qrcode("qr-reader");
-
       await scanner.start(
-        { deviceId: { exact: backCamera.id } },
+        { facingMode: "environment" }, // use back camera
         { fps, qrbox: qrBoxSize },
         async (decodedText) => {
           if (!scannedSet.current.has(decodedText)) {
             scannedSet.current.add(decodedText);
+
             const entry = {
               value: decodedText,
               time: new Date().toLocaleString(),
             };
+
             await dbRef.current.add("scans", entry);
             setHistory((prev) => [entry, ...prev]);
             setLastScan(decodedText);
           }
-        }
+        },
+        (_error) => {}
       );
 
       scannerRef.current = scanner;
       setScanning(true);
     } catch (err) {
-      console.error(err);
-      alert(
-        "Camera start failed. Make sure you allow camera access and are on HTTPS."
-      );
+      console.error("Camera start failed:", err);
+      alert("Camera could not be started. Make sure your site is served via HTTPS and camera permissions are allowed.");
     }
   };
 
   // Stop scanning
   const stopScanning = () => {
     if (scannerRef.current) {
-      scannerRef.current
-        .stop()
-        .then(() => {
-          scannerRef.current = null;
-          setScanning(false);
-        })
-        .catch(() => {});
+      scannerRef.current.stop().then(() => {
+        scannerRef.current = null;
+        setScanning(false);
+      }).catch(() => {});
     }
   };
 
-  // Export scans to Excel
+  // Export to Excel
   const exportToExcel = () => {
-    if (!history.length) return;
-
     const worksheet = XLSX.utils.json_to_sheet(history);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Scanned Data");
@@ -112,16 +97,15 @@ export default function QRScanner({ qrBoxSize = 300, fps = 25 }) {
   };
 
   return (
-    <div style={{ padding: 20, textAlign: "center" }}>
+    <div style={{ padding: 20 }}>
       <h2>Mobile QR Scanner</h2>
 
       <div
         id="qr-reader"
         style={{
-          width: "100%",
-          maxWidth: qrBoxSize,
+          width: qrBoxSize,
           height: qrBoxSize,
-          margin: "20px auto",
+          marginBottom: 20,
           border: "2px solid #444",
           borderRadius: 10,
         }}
@@ -160,9 +144,7 @@ export default function QRScanner({ qrBoxSize = 300, fps = 25 }) {
       )}
 
       <h3>Last Scan:</h3>
-      <p style={{ fontSize: 18, fontWeight: "bold" }}>
-        {lastScan || "Waiting..."}
-      </p>
+      <p style={{ fontSize: 18, fontWeight: "bold" }}>{lastScan || "Waiting..."}</p>
 
       <button
         onClick={exportToExcel}
@@ -181,7 +163,7 @@ export default function QRScanner({ qrBoxSize = 300, fps = 25 }) {
 
       <h3 style={{ marginTop: 30 }}>Total Scanned: {history.length}</h3>
 
-      <ul style={{ textAlign: "left", maxWidth: "400px", margin: "20px auto" }}>
+      <ul>
         {history.map((item) => (
           <li key={item.id}>
             <b>{item.value}</b> – <i>{item.time}</i>
