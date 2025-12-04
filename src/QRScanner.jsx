@@ -40,7 +40,7 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
 
     try {
       await scanner.start(
-        { facingMode: "environment" }, // use back camera
+        { facingMode: "environment" },
         { fps, qrbox: qrBoxSize },
         async (decodedText) => {
           if (!scannedSet.current.has(decodedText)) {
@@ -63,23 +63,39 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
       setScanning(true);
     } catch (err) {
       console.error("Camera start failed:", err);
-      alert("Camera could not be started. Make sure your site is served via HTTPS and camera permissions are allowed.");
+      alert(
+        "Camera could not be started. Make sure your site is served via HTTPS and camera permissions are allowed."
+      );
     }
   };
 
   // Stop scanning
   const stopScanning = () => {
     if (scannerRef.current) {
-      scannerRef.current.stop().then(() => {
-        scannerRef.current = null;
-        setScanning(false);
-      }).catch(() => {});
+      scannerRef.current
+        .stop()
+        .then(() => {
+          scannerRef.current = null;
+          setScanning(false);
+        })
+        .catch(() => {});
     }
   };
 
-  // Export to Excel
-  const exportToExcel = () => {
-    const worksheet = XLSX.utils.json_to_sheet(history);
+  // Export to Excel and reset for fresh scans
+  const exportToExcel = async () => {
+    if (history.length === 0) {
+      alert("No data to export!");
+      return;
+    }
+
+    // Prepare data with headers
+    const worksheetData = history.map((item) => ({
+      "Scanned Value": item.value,
+      "Date & Time": item.time,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(worksheetData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Scanned Data");
 
@@ -93,7 +109,17 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
 
-    saveAs(file, `QRCode_Scans_${Date.now()}.xlsx`);
+    // Save with current date in filename
+    const dateStr = new Date().toISOString().split("T")[0];
+    saveAs(file, `QRCode_Scans_${dateStr}.xlsx`);
+
+    // Reset app state for fresh scans
+    setHistory([]);
+    scannedSet.current.clear();
+    setLastScan("");
+    if (dbRef.current) {
+      await dbRef.current.clear("scans").catch((err) => console.error(err));
+    }
   };
 
   return (
@@ -144,7 +170,9 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
       )}
 
       <h3>Last Scan:</h3>
-      <p style={{ fontSize: 18, fontWeight: "bold" }}>{lastScan || "Waiting..."}</p>
+      <p style={{ fontSize: 18, fontWeight: "bold" }}>
+        {lastScan || "Waiting..."}
+      </p>
 
       <button
         onClick={exportToExcel}
