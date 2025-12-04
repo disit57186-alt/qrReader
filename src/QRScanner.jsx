@@ -4,9 +4,10 @@ import { openDB } from "idb";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 
-export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
+export default function QRScanner({ qrBoxSize = 300, fps = 25 }) {
   const [history, setHistory] = useState([]);
   const [lastScan, setLastScan] = useState("");
+  const [scanning, setScanning] = useState(false);
   const scannerRef = useRef(null);
   const dbRef = useRef(null);
   const scannedSet = useRef(new Set());
@@ -30,50 +31,69 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
     initDB();
   }, []);
 
-  // Start QR scanner
-  useEffect(() => {
-    const startScanner = async () => {
-      if (!dbRef.current) return;
+  // Start scanning
+  const startScanning = async () => {
+    if (!dbRef.current) return;
+    if (scannerRef.current) return;
+
+    try {
+      const cameras = await Html5Qrcode.getCameras();
+      if (!cameras || cameras.length === 0) {
+        alert("No camera found on device");
+        return;
+      }
+
+      // Prefer back camera
+      const backCamera = cameras.find((cam) =>
+        cam.label.toLowerCase().includes("back")
+      ) || cameras[0];
 
       const scanner = new Html5Qrcode("qr-reader");
 
-      try {
-        await scanner.start(
-          { facingMode: "environment" },
-          { fps, qrbox: qrBoxSize },
-          async (decodedText) => {
-            if (!scannedSet.current.has(decodedText)) {
-              scannedSet.current.add(decodedText);
-
-              const entry = {
-                value: decodedText,
-                time: new Date().toLocaleString(),
-              };
-
-              await dbRef.current.add("scans", entry);
-              setHistory((prev) => [entry, ...prev]);
-              setLastScan(decodedText);
-            }
+      await scanner.start(
+        { deviceId: { exact: backCamera.id } },
+        { fps, qrbox: qrBoxSize },
+        async (decodedText) => {
+          if (!scannedSet.current.has(decodedText)) {
+            scannedSet.current.add(decodedText);
+            const entry = {
+              value: decodedText,
+              time: new Date().toLocaleString(),
+            };
+            await dbRef.current.add("scans", entry);
+            setHistory((prev) => [entry, ...prev]);
+            setLastScan(decodedText);
           }
-        );
+        }
+      );
 
-        scannerRef.current = scanner;
-      } catch (err) {
-        console.error("Camera start failed:", err);
-      }
-    };
+      scannerRef.current = scanner;
+      setScanning(true);
+    } catch (err) {
+      console.error(err);
+      alert(
+        "Camera start failed. Make sure you allow camera access and are on HTTPS."
+      );
+    }
+  };
 
-    startScanner();
-
-    return () => {
-      if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {});
-      }
-    };
-  }, [fps, qrBoxSize]);
+  // Stop scanning
+  const stopScanning = () => {
+    if (scannerRef.current) {
+      scannerRef.current
+        .stop()
+        .then(() => {
+          scannerRef.current = null;
+          setScanning(false);
+        })
+        .catch(() => {});
+    }
+  };
 
   // Export scans to Excel
   const exportToExcel = () => {
+    if (!history.length) return;
+
     const worksheet = XLSX.utils.json_to_sheet(history);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Scanned Data");
@@ -92,22 +112,57 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
   };
 
   return (
-    <div style={{ padding: 20 }}>
+    <div style={{ padding: 20, textAlign: "center" }}>
       <h2>Mobile QR Scanner</h2>
 
       <div
         id="qr-reader"
         style={{
-          width: qrBoxSize,
+          width: "100%",
+          maxWidth: qrBoxSize,
           height: qrBoxSize,
-          marginBottom: 20,
+          margin: "20px auto",
           border: "2px solid #444",
           borderRadius: 10,
         }}
       ></div>
 
+      {!scanning ? (
+        <button
+          onClick={startScanning}
+          style={{
+            background: "blue",
+            color: "#fff",
+            padding: "10px 20px",
+            border: "none",
+            borderRadius: 5,
+            cursor: "pointer",
+            marginBottom: 20,
+          }}
+        >
+          Start Scanning
+        </button>
+      ) : (
+        <button
+          onClick={stopScanning}
+          style={{
+            background: "red",
+            color: "#fff",
+            padding: "10px 20px",
+            border: "none",
+            borderRadius: 5,
+            cursor: "pointer",
+            marginBottom: 20,
+          }}
+        >
+          Stop Scanning
+        </button>
+      )}
+
       <h3>Last Scan:</h3>
-      <p style={{ fontSize: 18, fontWeight: "bold" }}>{lastScan || "Waiting..."}</p>
+      <p style={{ fontSize: 18, fontWeight: "bold" }}>
+        {lastScan || "Waiting..."}
+      </p>
 
       <button
         onClick={exportToExcel}
@@ -126,7 +181,7 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
 
       <h3 style={{ marginTop: 30 }}>Total Scanned: {history.length}</h3>
 
-      <ul>
+      <ul style={{ textAlign: "left", maxWidth: "400px", margin: "20px auto" }}>
         {history.map((item) => (
           <li key={item.id}>
             <b>{item.value}</b> – <i>{item.time}</i>
