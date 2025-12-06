@@ -40,7 +40,7 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
 
     try {
       await scanner.start(
-        { facingMode: "environment" }, // use back camera
+        { facingMode: "environment" },
         { fps, qrbox: qrBoxSize },
         async (decodedText) => {
           if (!scannedSet.current.has(decodedText)) {
@@ -56,7 +56,7 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
             setLastScan(decodedText);
           }
         },
-        (_error) => {}
+        () => {}
       );
 
       scannerRef.current = scanner;
@@ -70,10 +70,13 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
   // Stop scanning
   const stopScanning = () => {
     if (scannerRef.current) {
-      scannerRef.current.stop().then(() => {
-        scannerRef.current = null;
-        setScanning(false);
-      }).catch(() => {});
+      scannerRef.current
+        .stop()
+        .then(() => {
+          scannerRef.current = null;
+          setScanning(false);
+        })
+        .catch(() => {});
     }
   };
 
@@ -89,11 +92,20 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
     });
 
     const file = new Blob([excelBuffer], {
-      type:
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
 
     saveAs(file, `QRCode_Scans_${Date.now()}.xlsx`);
+  };
+
+  // ⭐ Clear all scan history
+  const clearHistory = async () => {
+    if (!dbRef.current) return;
+
+    await dbRef.current.clear("scans"); // clear IndexedDB
+    setHistory([]);                     // clear UI list
+    setLastScan("");                    // reset last scan
+    scannedSet.current = new Set();     // reset duplicate tracking
   };
 
   return (
@@ -144,7 +156,9 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
       )}
 
       <h3>Last Scan:</h3>
-      <p style={{ fontSize: 18, fontWeight: "bold" }}>{lastScan || "Waiting..."}</p>
+      <p style={{ fontSize: 18, fontWeight: "bold" }}>
+        {lastScan || "Waiting..."}
+      </p>
 
       <button
         onClick={exportToExcel}
@@ -159,6 +173,22 @@ export default function QRScanner({ qrBoxSize = 250, fps = 25 }) {
         }}
       >
         Download Excel
+      </button>
+
+      {/* ⭐ Clear History Button */}
+      <button
+        onClick={clearHistory}
+        style={{
+          background: "orange",
+          color: "#fff",
+          padding: "10px 20px",
+          border: "none",
+          borderRadius: 5,
+          cursor: "pointer",
+          marginTop: 10,
+        }}
+      >
+        Clear History
       </button>
 
       <h3 style={{ marginTop: 30 }}>Total Scanned: {history.length}</h3>
